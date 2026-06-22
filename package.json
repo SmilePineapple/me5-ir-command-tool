@@ -7,6 +7,8 @@
     "start": "node server-admzip.js"
   },
   "dependencies": {
-    "adm-zip": "^0.5.17"
+    "adm-zip": "^0.5.17",
+    "express": "^5.2.1",
+    "multer": "^2.2.0"
   }
 }
