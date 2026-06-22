@@ -1,0 +1,8 @@
+.vercel
+node_modules/
+*.me5
+*.ME5
+*.xml
+*.zip
+*.csv
+temp_*.me5

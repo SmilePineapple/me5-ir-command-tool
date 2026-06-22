@@ -1,0 +1,12 @@
+{
+  "name": "me5-ir-command-tool",
+  "version": "1.0.0",
+  "description": "ME5 IR Command Import Tool",
+  "main": "server-admzip.js",
+  "scripts": {
+    "start": "node server-admzip.js"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.17"
+  }
+}

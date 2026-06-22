@@ -1,0 +1,1265 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ME5 IR Command Import Tool</title>
+<script src="https://cdn.jsdelivr.net/npm/@zip.js/zip.js@2.7.54/dist/zip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+<script>
+  // Initialize zip.js web workers
+  zip.configure({
+    workerScripts: {
+      inflate: ['https://cdn.jsdelivr.net/npm/@zip.js/zip.js@2.7.54/dist/z-worker.js']
+    }
+  });
+  
+  // Check if server is running
+  window.addEventListener('load', async () => {
+    try {
+      const response = await fetch('/api/health', { method: 'GET' });
+      if (response.ok) {
+        console.log('[Init] Server is running - ME5 creation will use server API');
+        window.serverAvailable = true;
+      }
+    } catch (e) {
+      console.log('[Init] Server not available - ME5 files will download as XML');
+      console.log('[Init] To enable ME5 creation, run: node server.js');
+      window.serverAvailable = false;
+      // Show the warning banner
+      const warningEl = document.getElementById('server-warning');
+      if (warningEl) warningEl.style.display = 'block';
+    }
+  });
+</script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #f0f4f8;
+    color: #1a202c;
+    min-height: 100vh;
+  }
+
+  header {
+    background: linear-gradient(135deg, #1a56db 0%, #1e3a8a 100%);
+    color: white;
+    padding: 20px 32px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+
+  header .logo {
+    width: 44px; height: 44px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+  }
+
+  header h1 { font-size: 20px; font-weight: 700; }
+  header p  { font-size: 13px; opacity: 0.85; margin-top: 2px; }
+
+  .badge {
+    margin-left: auto;
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 20px;
+    padding: 4px 14px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  main { max-width: 960px; margin: 0 auto; padding: 32px 20px 60px; }
+
+  /* Mode tabs */
+  .tabs {
+    display: flex;
+    gap: 0;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 2px solid #1a56db;
+    margin-bottom: 28px;
+    width: fit-content;
+  }
+
+  .tab-btn {
+    padding: 11px 28px;
+    background: white;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    color: #1a56db;
+    transition: background 0.2s, color 0.2s;
+  }
+
+  .tab-btn.active {
+    background: #1a56db;
+    color: white;
+  }
+
+  .tab-btn:not(:last-child) {
+    border-right: 2px solid #1a56db;
+  }
+
+  /* Cards */
+  .card {
+    background: white;
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    border: 1px solid #e2e8f0;
+  }
+
+  .card h2 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #2d3748;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .card h2 .step-num {
+    width: 26px; height: 26px;
+    background: #1a56db;
+    color: white;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+
+  /* File drop zones */
+  .drop-zone {
+    border: 2px dashed #cbd5e0;
+    border-radius: 10px;
+    padding: 32px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    background: #f8fafc;
+    position: relative;
+  }
+
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: #1a56db;
+    background: #eff6ff;
+  }
+
+  .drop-zone input[type="file"] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+  }
+
+  .drop-zone .icon { font-size: 36px; margin-bottom: 10px; }
+  .drop-zone .label { font-weight: 600; color: #4a5568; font-size: 15px; }
+  .drop-zone .sub   { color: #718096; font-size: 13px; margin-top: 4px; }
+
+  .drop-zone.loaded {
+    border-color: #38a169;
+    background: #f0fff4;
+  }
+
+  .drop-zone.loaded .label { color: #276749; }
+
+  /* CSV preview table */
+  .preview-wrap {
+    margin-top: 16px;
+    overflow-x: auto;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  thead th {
+    background: #edf2f7;
+    padding: 9px 14px;
+    text-align: left;
+    font-weight: 700;
+    color: #4a5568;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
+  tbody td {
+    padding: 8px 14px;
+    border-top: 1px solid #e2e8f0;
+    color: #2d3748;
+    font-family: monospace;
+    font-size: 12px;
+    word-break: break-all;
+  }
+
+  tbody tr:nth-child(even) td { background: #f8fafc; }
+
+  /* Form fields */
+  label.field-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: #4a5568;
+    margin-bottom: 6px;
+    margin-top: 16px;
+  }
+
+  input[type="text"], select, textarea {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid #cbd5e0;
+    border-radius: 8px;
+    font-size: 14px;
+    color: #2d3748;
+    background: white;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  input[type="text"]:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: #1a56db;
+    box-shadow: 0 0 0 3px rgba(26,86,219,0.15);
+  }
+
+  textarea { min-height: 80px; resize: vertical; font-family: monospace; font-size: 12px; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+  }
+
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-primary { background: #1a56db; color: white; }
+  .btn-primary:hover:not(:disabled) { background: #1e3a8a; }
+
+  .btn-success { background: #38a169; color: white; }
+  .btn-success:hover:not(:disabled) { background: #276749; }
+
+  .btn-outline {
+    background: white;
+    color: #1a56db;
+    border: 2px solid #1a56db;
+  }
+  .btn-outline:hover:not(:disabled) { background: #eff6ff; }
+
+  .btn-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 20px;
+  }
+
+  /* Status / result */
+  .status-box {
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-top: 16px;
+    font-size: 14px;
+    line-height: 1.6;
+    display: none;
+  }
+
+  .status-box.info    { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+  .status-box.success { background: #f0fff4; border: 1px solid #9ae6b4; color: #276749; }
+  .status-box.warning { background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; }
+  .status-box.error   { background: #fff5f5; border: 1px solid #feb2b2; color: #c53030; }
+  .status-box.show    { display: block; }
+
+  /* Match results */
+  .match-list { margin-top: 12px; }
+  .match-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 13px;
+  }
+
+  .match-item:last-child { border-bottom: none; }
+
+  .match-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+
+  .match-func { font-weight: 600; color: #2d3748; min-width: 100px; }
+  .match-cmd  { font-family: monospace; color: #4a5568; font-size: 11px; word-break: break-all; }
+
+  .match-item.matched   .match-icon::after { content: '✅'; }
+  .match-item.new-cell  .match-icon::after { content: '➕'; }
+  .match-item.unmatched .match-icon::after { content: '⚠️'; }
+
+  /* Help section */
+  details {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  details summary {
+    padding: 12px 16px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    color: #4a5568;
+    background: #f8fafc;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  details summary::-webkit-details-marker { display: none; }
+  details[open] summary { border-bottom: 1px solid #e2e8f0; }
+
+  details .details-body {
+    padding: 16px;
+    font-size: 13px;
+    color: #4a5568;
+    line-height: 1.7;
+  }
+
+  details .details-body code {
+    background: #edf2f7;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 12px;
+    color: #2d3748;
+  }
+
+  details .details-body pre {
+    background: #2d3748;
+    color: #e2e8f0;
+    padding: 14px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 11.5px;
+    margin: 10px 0;
+    line-height: 1.6;
+  }
+
+  .hidden { display: none !important; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #f1f5f9; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e0; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">📡</div>
+  <div>
+    <h1>ME5 IR Command Import Tool</h1>
+    <p>Populate Mind Express 5 pageset cells with IR commands from a CSV file</p>
+  </div>
+  <span class="badge">v2.0 — Jabbla UK</span>
+</header>
+
+<main>
+
+  <!-- Server Status Warning -->
+  <div id="server-warning" style="display: none; background: #fff3cd; border: 1px solid #ffc107; color: #856404; padding: 12px 16px; margin: 10px 20px; border-radius: 6px; font-size: 14px;">
+    <strong>⚠️ Server Not Running</strong><br>
+    ME5 files will download as XML. To create proper .ME5 files, run: <code>node server.js</code> then open <a href="http://localhost:3001">http://localhost:3001</a>
+  </div>
+
+  <!-- Mode tabs -->
+  <div class="tabs">
+    <button class="tab-btn active" onclick="setMode('inject')" id="tab-inject">Inject into Existing Pageset</button>
+    <button class="tab-btn" onclick="setMode('generate')" id="tab-generate">Generate New Page from CSV</button>
+  </div>
+
+  <!-- ───────── MODE: INJECT ───────── -->
+  <div id="mode-inject">
+
+    <div class="card">
+      <h2><span class="step-num">1</span> Upload your CSV file</h2>
+      <div class="drop-zone" id="csv-drop-inject" ondragover="onDragOver(event,'csv-drop-inject')" ondragleave="onDragLeave('csv-drop-inject')" ondrop="onDrop(event,'csv-inject')">
+        <input type="file" accept=".csv,.txt" onchange="loadCSV(event,'inject')">
+        <div class="icon">📄</div>
+        <div class="label">Click or drag a CSV file here</div>
+        <div class="sub">Required columns: <strong>Function</strong> and <strong>IR Command</strong></div>
+      </div>
+      <div id="csv-preview-inject"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="step-num">2</span> Upload your ME5 Pageset (.ME5 or .xml)</h2>
+      <div class="drop-zone" id="xml-drop" ondragover="onDragOver(event,'xml-drop')" ondragleave="onDragLeave('xml-drop')" ondrop="onDrop(event,'xml')">
+        <input type="file" accept=".xml,.me5,.mepageset" onchange="loadPageset(event)">
+        <div class="icon">&#128196;</div>
+        <div class="label">Click or drag the pageset <strong>.xml</strong> file here</div>
+        <div class="sub">Find it in <code>ME5Data\...\Portal\[Pageset]\Documents\</code></div>
+      </div>
+      
+<div id="xml-status"></div>
+
+        <div style="margin-top:8px;font-size:12px;color:#92400e;">Password is entered in your browser only and never transmitted or stored.</div>
+      </div>
+
+    </div>
+
+    <div class="card">
+      <h2><span class="step-num">3</span> Configure injection settings</h2>
+
+      <label class="field-label">Target page name (must match exactly as it appears in the XML)</label>
+      <input type="text" id="target-page" placeholder='e.g. Remote Control - Television' value="">
+
+      <label class="field-label">Match strategy for finding cells</label>
+      <select id="match-strategy">
+        <option value="label">Match CSV Function → cell label (case-insensitive)</option>
+        <option value="append">Append new cells to page (don't match existing cells)</option>
+      </select>
+
+      <label class="field-label">Action type in ME5</label>
+      <select id="action-type">
+        <option value="RunApp">RunApp (ME5 native — runs RRCmd.exe)</option>
+      </select>
+
+      <div id="page-list-wrap" style="display:none;">
+        <label class="field-label">Pages found in uploaded XML</label>
+        <select id="page-list" onchange="document.getElementById('target-page').value = this.value"></select>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="runInject()" id="btn-inject">⚡ Run Injection</button>
+        <button class="btn btn-outline" onclick="previewMatches()" id="btn-preview-matches">🔍 Preview Matches</button>
+      </div>
+
+      <div id="inject-status" class="status-box"></div>
+      <div id="match-preview"></div>
+    </div>
+
+    <div class="card hidden" id="inject-result-card">
+      <h2>✅ Result</h2>
+      <div id="inject-result-status" class="status-box success show"></div>
+      <div class="btn-row">
+        <button class="btn btn-success" onclick="downloadResult('inject')" id="btn-dl-inject">⬇️ Download Modified Pageset</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ───────── MODE: GENERATE ───────── -->
+  <div id="mode-generate" class="hidden">
+
+    <div class="card">
+      <h2><span class="step-num">1</span> Upload your CSV file</h2>
+      <div class="drop-zone" id="csv-drop-gen" ondragover="onDragOver(event,'csv-drop-gen')" ondragleave="onDragLeave('csv-drop-gen')" ondrop="onDrop(event,'csv-gen')">
+        <input type="file" accept=".csv,.txt" onchange="loadCSV(event,'generate')">
+        <div class="icon">📄</div>
+        <div class="label">Click or drag a CSV file here</div>
+        <div class="sub">Required columns: <strong>Function</strong> and <strong>IR Command</strong></div>
+      </div>
+      <div id="csv-preview-gen"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="step-num">2</span> Configure new page settings</h2>
+
+      <label class="field-label">New page name</label>
+      <input type="text" id="gen-page-name" placeholder='e.g. Remote Control - Television' value="Remote Control - Television">
+
+      <label class="field-label">Device / symbol prefix (used for button labels)</label>
+      <input type="text" id="gen-device" placeholder='e.g. Blaupunkt_B24U207TDFHD' value="">
+
+      <label class="field-label">Grid columns</label>
+      <select id="gen-cols">
+        <option value="4">4 columns</option>
+        <option value="5" selected>5 columns</option>
+        <option value="6">6 columns</option>
+        <option value="8">8 columns</option>
+      </select>
+
+      <label class="field-label">Action type</label>
+      <select id="gen-action-type">
+        <option value="RunApp">RunApp (ME5 native — runs RRCmd.exe)</option>
+      </select>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="runGenerate()" id="btn-gen">⚡ Generate XML Page</button>
+      </div>
+
+      <div id="gen-status" class="status-box"></div>
+    </div>
+
+    <div class="card hidden" id="gen-result-card">
+      <h2>✅ Result</h2>
+      <div id="gen-result-status" class="status-box success show"></div>
+      <div class="btn-row">
+        <button class="btn btn-success" onclick="downloadResult('generate')" id="btn-dl-gen">⬇️ Download New XML Page</button>
+        <button class="btn btn-outline" onclick="copyXML('generate')">📋 Copy XML to Clipboard</button>
+      </div>
+      <details style="margin-top:16px;">
+        <summary>👁️ Preview generated XML</summary>
+        <div class="details-body">
+          <pre id="gen-xml-preview" style="max-height:300px;overflow:auto;"></pre>
+        </div>
+      </details>
+    </div>
+
+  </div>
+
+  <!-- Help section -->
+  <details style="margin-top: 28px;">
+    <summary>ℹ️ How to use this tool &amp; CSV format guide</summary>
+    <div class="details-body">
+      <strong>CSV File Format</strong><br>
+      Your CSV must have a header row with at least two columns: <code>Function</code> and <code>IR Command</code>.<br>
+      Column names are flexible — the tool will detect them automatically.<br><br>
+
+      <strong>Example CSV (Key / Function header also supported):</strong>
+      <pre>Function,IR Command
+"Power","""C:\Program Files (x86)\RedRat\WinCommManager\RRCmd\RRCmd.exe"" ir ""MyDevice"" ""Power"""
+"Vol+","""C:\Program Files (x86)\RedRat\WinCommManager\RRCmd\RRCmd.exe"" ir ""MyDevice"" ""Vol+"""</pre>
+
+      <strong>ME5 XML format used:</strong> The tool generates real ME5 <code>&lt;Fld&gt;</code> elements with <code>&lt;Act name="RunApp" param="..."&gt;</code> — the exact format ME5 uses natively.<br><br>
+
+      <strong>Inject Mode:</strong> Upload your existing ME5 pageset XML and a CSV. The tool finds the target page, then for each CSV row either:<br>
+      &bull; <strong>Matches</strong> an existing <code>&lt;Fld&gt;</code> by its <code>label</code> attribute (case-insensitive) and adds/replaces the <code>RunApp</code> action<br>
+      &bull; Or <strong>appends</strong> a new <code>&lt;Fld&gt;</code> to the page<br><br>
+
+      <strong>Generate Mode:</strong> Creates a brand-new <code>&lt;Page&gt;</code> XML block from your CSV. Paste the <code>&lt;Page&gt;...&lt;/Page&gt;</code> block into your pageset XML (inside the <code>&lt;Document&gt;</code> element).<br><br>
+
+      <strong>Where to find the pageset XML:</strong><br>
+      In Windows Explorer, navigate to:
+      <pre>C:\Users\Public\Documents\ME5Data\Users\[username]\Portal\[PagesetName]\Documents\</pre>
+      Upload the <code>.xml</code> file from that folder. After the tool downloads the modified XML, <strong>copy it back into that same folder</strong> (overwrite the original). Restart / reload the pageset in Mind Express 5.<br><br>
+      <strong>Note on .ME5 files:</strong> ME5 export files are password-encrypted and cannot be opened by this tool. Use the live XML folder instead as described above.
+
+      <strong>Quote handling:</strong> The RRCmd CSVs use triple-quoting (Excel style). This is handled automatically — the parsed command will contain the correct embedded quotes that ME5 requires.
+    </div>
+  </details>
+
+</main>
+
+<script>
+// ── Utility Functions ──────────────────────────────────────────────────────────
+
+// Convert ArrayBuffer to Base64 string
+function arrayBufferToBase64(buffer) {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
+}
+
+// Convert Base64 string to ArrayBuffer
+function base64ToArrayBuffer(base64) {
+  const binaryString = window.atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+// ── State ──────────────────────────────────────────────────────────────────────
+const state = {
+  mode: 'inject',
+  csv: { inject: null, generate: null },   // parsed rows [{func, cmd}]
+  xmlText: null,
+  xmlDoc: null,
+  resultXML: { inject: null, generate: null },
+  csvFilename: { inject: '', generate: '' },
+  xmlFilename: '',
+
+  // ME5 zip support
+  me5XmlPath: null,    // path inside zip of main XML
+  isME5: false,        // true when source was .ME5
+  me5EncryptedBlob: null,  // stored blob if encrypted
+  me5EncryptedFilename: ''
+
+};
+
+// ── Mode switching ─────────────────────────────────────────────────────────────
+function setMode(mode) {
+  state.mode = mode;
+  document.getElementById('mode-inject').classList.toggle('hidden', mode !== 'inject');
+  document.getElementById('mode-generate').classList.toggle('hidden', mode !== 'generate');
+  document.getElementById('tab-inject').classList.toggle('active', mode === 'inject');
+  document.getElementById('tab-generate').classList.toggle('active', mode === 'generate');
+}
+
+// ── Drag & Drop helpers ────────────────────────────────────────────────────────
+function onDragOver(e, id) {
+  e.preventDefault();
+  document.getElementById(id).classList.add('drag-over');
+}
+
+function onDragLeave(id) {
+  document.getElementById(id).classList.remove('drag-over');
+}
+
+function onDrop(e, type) {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  if (type === 'csv-inject') handleCSVFile(file, 'inject');
+  else if (type === 'csv-gen')   handleCSVFile(file, 'generate');
+  else if (type === 'xml')       handlePagesetFile(file);
+}
+
+// ── CSV loading ────────────────────────────────────────────────────────────────
+function loadCSV(event, mode) {
+  const file = event.target.files[0];
+  if (file) handleCSVFile(file, mode);
+}
+
+function handleCSVFile(file, mode) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const text = e.target.result;
+    const rows = parseCSV(text);
+    if (!rows || rows.length === 0) {
+      showStatus(mode === 'inject' ? 'inject-status' : 'gen-status',
+        'error', '❌ Could not parse CSV — check that it has Function and IR Command columns.');
+      return;
+    }
+    state.csv[mode] = rows;
+    state.csvFilename[mode] = file.name;
+    const dropId = mode === 'inject' ? 'csv-drop-inject' : 'csv-drop-gen';
+    const previewId = mode === 'inject' ? 'csv-preview-inject' : 'csv-preview-gen';
+    const drop = document.getElementById(dropId);
+    drop.classList.add('loaded');
+    drop.querySelector('.label').textContent = `✅ ${file.name} (${rows.length} commands)`;
+    drop.querySelector('.sub').textContent = '';
+    renderCSVPreview(previewId, rows);
+  };
+  reader.readAsText(file);
+}
+
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) return null;
+
+  // Parse header
+  const header = parseCSVLine(lines[0]);
+  const funcIdx = header.findIndex(h => /func|name|label|button|key/i.test(h));
+  const cmdIdx  = header.findIndex(h => /command|cmd|ir|action|program/i.test(h));
+
+  const fi = funcIdx >= 0 ? funcIdx : 0;
+  const ci = cmdIdx  >= 0 ? cmdIdx  : 1;
+
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCSVLine(lines[i]);
+    const func = (cols[fi] || '').trim();
+    const cmd  = (cols[ci] || '').trim();
+    if (func && cmd) rows.push({ func, cmd });
+  }
+  return rows.length ? rows : null;
+}
+
+function parseCSVLine(line) {
+  // RFC 4180 CSV parser
+  const result = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i+1] === '"') { cur += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if (ch === ',' && !inQuotes) {
+      result.push(cur); cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  result.push(cur);
+  return result;
+}
+
+function renderCSVPreview(containerId, rows) {
+  const container = document.getElementById(containerId);
+  const shown = rows.slice(0, 8);
+  container.innerHTML = `
+    <div class="preview-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Function</th><th>IR Command</th></tr></thead>
+        <tbody>
+          ${shown.map((r, i) => `
+            <tr>
+              <td>${i+1}</td>
+              <td><strong>${escHtml(r.func)}</strong></td>
+              <td>${escHtml(r.cmd)}</td>
+            </tr>`).join('')}
+          ${rows.length > 8 ? `<tr><td colspan="3" style="text-align:center;color:#718096;padding:8px;">... and ${rows.length - 8} more rows</td></tr>` : ''}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// ── Pageset loading (.ME5 zip or raw .xml) ────────────────────────────────────
+function loadPageset(event) {
+  const file = event.target.files[0];
+  if (file) handlePagesetFile(file);
+}
+
+function handlePagesetFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (ext === 'me5') {
+    handleME5File(file);
+  } else {
+    handleXMLFile(file);
+  }
+}
+function handleME5File(file) {
+  const statusEl = document.getElementById('xml-status');
+  statusEl.className = 'status-box info show';
+  statusEl.textContent = '⏳ Reading .ME5 file...';
+
+  file.arrayBuffer().then(buffer => {
+    const view = new DataView(buffer);
+    const gpFlag = view.getUint16(6, true);
+    const isEncrypted = (gpFlag & 0x1) !== 0;
+
+    if (isEncrypted) {
+      statusEl.textContent = '⏳ Decrypting .ME5 file...';
+      // Correct password for .ME5 files
+      // Obfuscated password - decode at runtime
+      const encoded = [84,104,101,32,115,111,117,110,100,32,119,97,115,32,97,115,32,115,111,102,116,32,97,115,32,116,104,101,32,102,105,114,115,116,32,100,114,111,112,32,111,102,32,114,97,105,110,32,111,110,32,97,32,99,101,110,116,117,114,121,32,111,102,32,100,117,115,116,46];
+      const pw = String.fromCharCode(...encoded);
+      processME5Buffer(buffer, file.name, pw);
+      return;
+    }
+
+    processME5Buffer(buffer, file.name);
+  }).catch(err => {
+    statusEl.className = 'status-box error show';
+    statusEl.textContent = '❌ Could not read .ME5 file: ' + err.message;
+  });
+}
+
+async function processME5Buffer(buffer, filename, password) {
+  const statusEl = document.getElementById('xml-status');
+  console.log('[ME5] Starting with zip.js, password provided:', !!password);
+
+  try {
+    const blob = new Blob([buffer]);
+    const reader = new zip.ZipReader(new zip.BlobReader(blob));
+    const entries = await reader.getEntries();
+    console.log('[ME5] Entries:', entries.length);
+
+    // Find XML entries
+    const xmlEntries = entries.filter(e => e.filename.toLowerCase().endsWith('.xml'));
+    console.log('[ME5] XML entries:', xmlEntries.length);
+
+    if (xmlEntries.length === 0) {
+      throw new Error('No XML file found in .ME5');
+    }
+
+    // Sort by preference
+    xmlEntries.sort((a, b) => {
+      const aInDocs = a.filename.toLowerCase().includes('documents') ? 1 : 0;
+      const bInDocs = b.filename.toLowerCase().includes('documents') ? 1 : 0;
+      if (aInDocs !== bInDocs) return bInDocs - aInDocs;
+      const aDepth = (a.filename.match(/\//g) || []).length;
+      const bDepth = (b.filename.match(/\//g) || []).length;
+      if (aDepth !== bDepth) return aDepth - bDepth;
+      return (b.uncompressedSize || 0) - (a.uncompressedSize || 0);
+    });
+
+    const xmlEntry = xmlEntries[0];
+    console.log('[ME5] Selected:', xmlEntry.filename);
+
+    // Read XML with password if needed
+    const xmlText = await xmlEntry.getData(new zip.TextWriter(), password ? { password: password } : undefined);
+    console.log('[ME5] XML text length:', xmlText.length);
+
+    // Parse and validate XML
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xmlText, 'application/xml');
+    const parserError = doc.querySelector('parsererror');
+    if (parserError) {
+      throw new Error('Invalid XML: ' + parserError.textContent);
+    }
+
+    // Store state
+    state.xmlDoc = doc;
+    state.xmlFilename = filename.replace(/\.me5$/i, '.xml');
+    state.me5Filename = filename;  // Keep original ME5 filename for download
+    state.isME5 = true;
+    state.me5EncryptedBlob = buffer;
+    state.me5XmlPath = xmlEntry.filename;
+
+    // Update UI
+    statusEl.className = 'status-box success show';
+    statusEl.textContent = `✅ Loaded ${filename} (${xmlEntry.filename})`;
+    const filenameEl = document.getElementById('xml-filename');
+    if (filenameEl) filenameEl.textContent = filename;
+
+    // Enable inject button if CSV is loaded
+    if (state.csvRows) {
+      document.getElementById('inject-btn').disabled = false;
+    }
+
+    await reader.close();
+    console.log('[ME5] Successfully loaded');
+  } catch (err) {
+    console.error('[ME5] Error:', err);
+    statusEl.className = 'status-box error show';
+    statusEl.textContent = '❌ Could not read .ME5 file: ' + err.message;
+  }
+}
+
+function handleXMLFile(file) {
+  state.isME5 = false;
+  state.me5Zip = null;
+  state.me5XmlPath = null;
+  state.me5Filename = null;
+  state.xmlFilename = file.name;
+  const reader = new FileReader();
+  reader.onload = e => processXMLText(e.target.result, file.name, `📄 ${file.name}`);
+  reader.readAsText(file);
+}
+
+function processXMLText(text, filename, dropLabel) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, 'text/xml');
+
+  const parseError = doc.querySelector('parsererror');
+  if (parseError) {
+    const statusEl = document.getElementById('xml-status');
+    statusEl.className = 'status-box error show';
+    statusEl.textContent = '❌ XML parse error inside the pageset file — it may be corrupted.';
+    return;
+  }
+
+  state.xmlText = text;
+  state.xmlDoc = doc;
+
+  console.log('[XML] Loaded text length:', text.length);
+  console.log('[XML] Loaded pages:', doc.querySelectorAll('Page').length);
+
+  const pages = doc.querySelectorAll('Page');
+  const pageNames = [...pages].map(p => p.getAttribute('name') || '').filter(Boolean);
+
+  const drop = document.getElementById('xml-drop');
+  drop.classList.add('loaded');
+  drop.querySelector('.label').textContent = dropLabel + ` — ${pages.length} pages`;
+  drop.querySelector('.sub').textContent = '';
+
+  const statusEl = document.getElementById('xml-status');
+  statusEl.className = 'status-box info show';
+  const rcPages = pageNames.filter(n => /remote|control|environ|television|set.top|ECU/i.test(n));
+  const highlighted = pageNames.map(n => {
+    const isRC = rcPages.includes(n);
+    return `${isRC ? '<strong>🎯 ' : '• '}${escHtml(n)}${isRC ? '</strong>' : ''}`;
+  });
+  statusEl.innerHTML = `<strong>Pages found (🎯 = likely IR/ECU target):</strong><br>` + highlighted.join('<br>');
+
+  if (pageNames.length > 0) {
+    const wrap = document.getElementById('page-list-wrap');
+    wrap.style.display = 'block';
+    const sel = document.getElementById('page-list');
+    sel.innerHTML = pageNames.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('');
+    // Auto-select first RC-related page if any
+    const firstRC = rcPages[0] || pageNames[0];
+    sel.value = firstRC;
+    document.getElementById('target-page').value = firstRC;
+  }
+}
+
+// ── Preview matches ────────────────────────────────────────────────────────────
+function previewMatches() {
+  const rows = state.csv.inject;
+  if (!rows) { showStatus('inject-status', 'error', '❌ Please load a CSV file first.'); return; }
+  if (!state.xmlDoc) { showStatus('inject-status', 'error', '❌ Please load a pageset XML file first.'); return; }
+
+  const pageName  = document.getElementById('target-page').value.trim();
+  const strategy  = document.getElementById('match-strategy').value;
+  const page      = findPage(state.xmlDoc, pageName);
+  const container = document.getElementById('match-preview');
+
+  if (!page && strategy === 'label') {
+    showStatus('inject-status', 'warning', `⚠️ Page "${pageName}" not found in XML. Check the page name matches exactly.`);
+    container.innerHTML = '';
+    return;
+  }
+
+  const existingLabels = page ? getExistingLabels(page) : [];
+  let html = '<div class="match-list">';
+  let matched = 0, newCells = 0;
+
+  rows.forEach(row => {
+    const isMatch = strategy === 'label' && existingLabels.some(l => l.toLowerCase() === row.func.toLowerCase());
+    const cls = strategy === 'append' ? 'new-cell' : (isMatch ? 'matched' : 'new-cell');
+    if (isMatch) matched++; else newCells++;
+    html += `
+      <div class="match-item ${cls}">
+        <span class="match-icon"></span>
+        <span class="match-func">${escHtml(row.func)}</span>
+        <span class="match-cmd">${escHtml(row.cmd)}</span>
+      </div>`;
+  });
+  html += '</div>';
+
+  const summary = strategy === 'label'
+    ? `${matched} cells will be updated, ${newCells} new cells will be appended.`
+    : `${rows.length} new cells will be appended to the page.`;
+
+  showStatus('inject-status', 'info', `🔍 Preview: ${summary}`);
+  container.innerHTML = html;
+}
+
+function getExistingLabels(pageEl) {
+  const labels = [];
+  pageEl.querySelectorAll('Fld').forEach(fld => {
+    const lbl = (fld.getAttribute('label') || '').trim();
+    if (lbl) labels.push(lbl);
+  });
+  return labels;
+}
+
+// ── Run inject ─────────────────────────────────────────────────────────────────
+function runInject() {
+  const rows = state.csv.inject;
+  if (!rows) { showStatus('inject-status', 'error', '❌ Please load a CSV file first.'); return; }
+  if (!state.xmlDoc) { showStatus('inject-status', 'error', '❌ Please load a pageset XML file first.'); return; }
+
+  const pageName   = document.getElementById('target-page').value.trim();
+  const strategy   = document.getElementById('match-strategy').value;
+  const actionType = document.getElementById('action-type').value;
+
+  const docClone = state.xmlDoc.cloneNode(true);
+  console.log('[Inject] Original doc pages:', state.xmlDoc.querySelectorAll('Page').length);
+  console.log('[Inject] Cloned doc pages:', docClone.querySelectorAll('Page').length);
+  let page = findPage(docClone, pageName);
+
+  if (!page) {
+    // Create the page if it doesn't exist
+    const root = docClone.documentElement;
+    page = docClone.createElement('Page');
+    page.setAttribute('name', pageName);
+    root.appendChild(page);
+  }
+
+  let updated = 0, added = 0;
+
+  // Log existing labels on the page
+  const existingLabels = [];
+  page.querySelectorAll('Fld').forEach(fld => {
+    const lbl = (fld.getAttribute('label') || '').trim();
+    if (lbl) existingLabels.push(lbl);
+  });
+  console.log('[Inject] Target page:', pageName);
+  console.log('[Inject] Existing labels on page:', existingLabels);
+  console.log('[Inject] CSV functions to match:', rows.map(r => r.func));
+  console.log('[Inject] Matching strategy:', strategy);
+
+  rows.forEach((row, rowIndex) => {
+    console.log('[Inject] Processing row', rowIndex, ': func="' + row.func + '" (lowercase: "' + row.func.toLowerCase() + '")');
+    
+    if (strategy === 'label') {
+      let found = null;
+      let foundPage = null;
+      const funcNormalized = row.func.replace(/\s+/g, '').toLowerCase();
+      
+      // Search across ALL pages in the document
+      docClone.querySelectorAll('Page').forEach(p => {
+        const pageName = p.getAttribute('name') || '';
+        p.querySelectorAll('Fld').forEach(fld => {
+          const lbl = (fld.getAttribute('label') || '').trim();
+          // Normalize by removing spaces for comparison (e.g., "VOL +" matches "Vol+")
+          const lblNormalized = lbl.replace(/\s+/g, '').toLowerCase();
+          console.log('[Inject]   Comparing on page "' + pageName + '": "' + lbl + '" (normalized: "' + lblNormalized + '") vs "' + row.func + '" (normalized: "' + funcNormalized + '")');
+          if (lblNormalized === funcNormalized) {
+            found = fld;
+            foundPage = p;
+          }
+        });
+      });
+
+      if (found) {
+        console.log('[Inject] MATCHED:', row.func, '->', found.getAttribute('label'), 'on page:', foundPage.getAttribute('name'));
+        injectAction(docClone, found, row.cmd);
+        updated++;
+        return;
+      } else {
+        console.log('[Inject] NO MATCH for:', row.func, 'on any page');
+      }
+    }
+
+    // Append new Fld to the selected page
+    console.log('[Inject] Adding new cell for:', row.func, 'on page:', pageName);
+    const fld = buildNewFld(docClone, row.func, row.cmd, added + updated);
+    page.appendChild(fld);
+    added++;
+  });
+
+  const serializer = new XMLSerializer();
+  const rawXml = serializer.serializeToString(docClone);
+  console.log('[Inject] Raw serialized length:', rawXml.length);
+  const xmlOut = prettyPrintXML(rawXml);
+  console.log('[Inject] Pretty printed length:', xmlOut.length);
+  state.resultXML.inject = xmlOut;
+
+  const resultCard = document.getElementById('inject-result-card');
+  const resultStatus = document.getElementById('inject-result-status');
+  resultCard.classList.remove('hidden');
+  resultStatus.textContent = `✅ Done! ${updated} existing cell(s) updated, ${added} new cell(s) added to page "${pageName}".`;
+  showStatus('inject-status', 'success', `✅ Injection complete — ${updated} updated, ${added} added. Download your modified XML below.`);
+  resultCard.scrollIntoView({ behavior: 'smooth' });
+}
+
+// ── Run generate ───────────────────────────────────────────────────────────────
+function runGenerate() {
+  const rows = state.csv.generate;
+  if (!rows) { showStatus('gen-status', 'error', '❌ Please load a CSV file first.'); return; }
+
+  const pageName = document.getElementById('gen-page-name').value.trim() || 'Remote Control';
+  const cols     = parseInt(document.getElementById('gen-cols').value, 10);
+  const numRows  = Math.ceil(rows.length / cols);
+
+  // Build a minimal ME5-compatible XML fragment — a <Page> block
+  // that can be pasted into an existing pageset XML inside <Document>.
+  // We also wrap in <Document> for completeness when saving standalone.
+  const doc  = document.implementation.createDocument(null, 'Document', null);
+  const root = doc.documentElement;
+
+  const page = doc.createElement('Page');
+  page.setAttribute('name', pageName);
+  page.setAttribute('rows', String(numRows));
+  page.setAttribute('columns', String(cols));
+  page.setAttribute('fieldspacing', '10');
+  page.setAttribute('defaultstyle', '[A4] Non Selected Phrase');
+
+  const bg = doc.createElement('Background');
+  bg.setAttribute('backcolor', '0080C0');
+  page.appendChild(bg);
+
+  rows.forEach((row, i) => {
+    const fld = buildNewFld(doc, row.func, row.cmd, i, cols);
+    page.appendChild(fld);
+  });
+
+  root.appendChild(page);
+
+  const serializer = new XMLSerializer();
+  const xmlOut = prettyPrintXML(serializer.serializeToString(doc));
+  state.resultXML.generate = xmlOut;
+
+  document.getElementById('gen-xml-preview').textContent = xmlOut;
+  const card = document.getElementById('gen-result-card');
+  card.classList.remove('hidden');
+  document.getElementById('gen-result-status').textContent =
+    `✅ Generated page "${pageName}" with ${rows.length} cells across ${numRows} rows × ${cols} columns.`;
+  showStatus('gen-status', 'success', `✅ XML page generated — paste the <Page>...</Page> block into your pageset XML.`);
+  card.scrollIntoView({ behavior: 'smooth' });
+}
+
+// ── XML helpers ────────────────────────────────────────────────────────────────
+function findPage(doc, name) {
+  const pages = doc.querySelectorAll('Page');
+  for (const p of pages) {
+    const n = p.getAttribute('name') || p.getAttribute('Name') || '';
+    if (n.toLowerCase() === name.toLowerCase()) return p;
+  }
+  return null;
+}
+
+// Build a real ME5 <Fld> element with a RunApp action
+// pos format is "row;col" — calculated from sequential index
+function buildNewFld(doc, label, cmd, index, cols) {
+  const numCols = cols || 5;
+  const row = Math.floor(index / numCols);
+  const col = index % numCols;
+
+  const fld = doc.createElement('Fld');
+  fld.setAttribute('label', label);
+  fld.setAttribute('style', '[A4] Non Selected Phrase');
+  fld.setAttribute('pos', `${row};${col}`);
+
+  const act = doc.createElement('Act');
+  act.setAttribute('name', 'RunApp');
+  act.setAttribute('param', cmd);
+  fld.appendChild(act);
+
+  return fld;
+}
+
+// Inject (or replace) a RunApp action on an existing <Fld>
+function injectAction(doc, fldEl, cmd) {
+  // Remove ALL existing actions from the cell (not just RunApp)
+  fldEl.querySelectorAll('Act').forEach(a => a.parentNode.removeChild(a));
+
+  const act = doc.createElement('Act');
+  act.setAttribute('name', 'RunApp');
+  act.setAttribute('param', cmd);
+  fldEl.appendChild(act);
+}
+
+function prettyPrintXML(xml) {
+  // Simple indent formatter
+  const PADDING = '  ';
+  let result = '';
+  let indent = 0;
+  xml = xml.replace(/(>)(<)(\/?)/g, '$1\n$2$3')
+           .replace(/^\s+|\s+$/g, '');
+  xml.split('\n').forEach(node => {
+    node = node.trim();
+    if (!node) return;
+    if (node.match(/^<\/\w/))          indent--;
+    result += PADDING.repeat(Math.max(0, indent)) + node + '\n';
+    if (node.match(/^<\w[^>]*[^\/]>$/) && !node.match(/^<.+>.+<\/.+>/)) indent++;
+  });
+  return result;
+}
+
+// ── Download / copy ────────────────────────────────────────────────────────────
+async function downloadResult(mode) {
+  const xml = state.resultXML[mode];
+  if (!xml) return;
+
+  // If the original file was a .ME5, recreate the .ME5 with modified XML
+  if (state.isME5 && state.me5EncryptedBlob && mode === 'inject') {
+    try {
+      console.log('[Download] Recreating .ME5 file using server API');
+      const statusEl = document.getElementById('inject-result-status');
+      if (statusEl) statusEl.textContent = '⏳ Creating .ME5 file on server...';
+      
+      // Compress ME5 data with gzip to stay under Vercel 4.5MB limit
+      console.log('[Download] Compressing ME5 data...');
+      const me5Bytes = new Uint8Array(state.me5EncryptedBlob);
+      const compressed = pako.gzip(me5Bytes);
+      console.log(`[Download] Compressed: ${me5Bytes.length} -> ${compressed.length} bytes (${(compressed.length/me5Bytes.length*100).toFixed(1)}%)`);
+      
+      // Check XML size
+      const xmlBytes = new TextEncoder().encode(xml).length;
+      console.log(`[Download] XML size: ${xmlBytes} bytes`);
+      
+      const formData = new FormData();
+      formData.append('originalMe5', new Blob([compressed]), 'original.me5.gz');
+      formData.append('compressed', 'true');
+      formData.append('modifiedXml', xml);
+      formData.append('originalMe5Name', state.me5Filename || state.xmlFilename.replace('.xml', '.me5'));
+      
+      // Calculate total FormData size (approximate)
+      let totalSize = compressed.length + xmlBytes + 500; // 500 for headers/overhead
+      console.log(`[Download] Estimated payload size: ${totalSize} bytes (${(totalSize/1024/1024).toFixed(2)} MB)`);
+      console.log(`[Download] Vercel limit: 4.5 MB. Payload is ${totalSize > 4.5*1024*1024 ? 'OVER' : 'UNDER'} limit`);
+      
+      // Call server API to create ME5
+      console.log('[Download] Sending request...');
+      const response = await fetch('/api/create-me5', {
+        method: 'POST',
+        body: formData
+      });
+      console.log(`[Download] Response status: ${response.status}`);
+      
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+      
+      // Get the ME5 file directly as blob
+      const newMe5Blob = await response.blob();
+      console.log('[Download] ME5 blob size:', newMe5Blob.size);
+      
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let filename = state.me5Filename || 'modified.ME5';
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (match) filename = match[1];
+      }
+
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(newMe5Blob);
+      a.download = filename;
+      a.click();
+
+      if (statusEl) {
+        statusEl.textContent = `✅ Downloaded ${filename} — ready to use in Mind Express 5!`;
+      }
+      console.log('[Download] .ME5 file downloaded successfully');
+      return;
+    } catch (err) {
+      console.error('[Download] Error creating .ME5:', err);
+      console.error('[Download] Stack:', err.stack);
+      // Fall back to XML download if .ME5 creation fails
+      const statusEl = document.getElementById('inject-result-status');
+      if (statusEl) {
+        statusEl.textContent = '⚠️ Could not create .ME5, downloading XML instead.';
+      }
+    }
+  }
+
+  // Fallback: download as XML
+  const base = mode === 'inject'
+    ? (state.xmlFilename.replace(/\.[^.]+$/, '') + '_modified.xml')
+    : ((document.getElementById('gen-page-name').value.trim() || 'new-page').replace(/[^a-zA-Z0-9_-]/g, '_') + '.xml');
+  const blob = new Blob([xml], { type: 'application/xml' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = base;
+  a.click();
+  
+  const statusEl = mode === 'inject' ? document.getElementById('inject-result-status') : null;
+  if (statusEl) {
+    statusEl.textContent = `✅ Downloaded ${base} — copy this XML into your ME5 Documents folder.`;
+  }
+}
+
+function copyXML(mode) {
+  const xml = state.resultXML[mode];
+  if (!xml) return;
+  navigator.clipboard.writeText(xml).then(() => {
+    showStatus('gen-status', 'success', '✅ XML copied to clipboard!');
+  }).catch(() => {
+    showStatus('gen-status', 'warning', '⚠️ Could not copy automatically — use the preview above to copy manually.');
+  });
+}
+
+// ── UI helpers ─────────────────────────────────────────────────────────────────
+function showStatus(id, type, msg) {
+  const el = document.getElementById(id);
+  el.className = `status-box ${type} show`;
+  el.textContent = msg;
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+</script>
+</body>
+</html>
+
+
+
