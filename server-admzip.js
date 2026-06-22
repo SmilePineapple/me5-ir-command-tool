@@ -5,7 +5,7 @@ const AdmZip = require('adm-zip');
 
 const PORT = process.env.PORT || 3001;
 const app = express();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024, fieldSize: 10 * 1024 * 1024 } });
 
 // CORS
 app.use((req, res, next) => {
