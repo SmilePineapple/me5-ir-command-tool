@@ -1150,8 +1150,37 @@ async function downloadResult(mode) {
     try {
       console.log('[Download] Recreating .ME5 file using server API');
       const statusEl = document.getElementById('inject-result-status');
-      if (statusEl) statusEl.textContent = '⏳ Creating .ME5 file on server...';
-      
+
+      // --- Live progress UI ---
+      const progressSteps = [
+        { pct: 5,  delay: 0,    msg: '⏳ Connecting to server...' },
+        { pct: 15, delay: 3000, msg: '🔄 Server waking up (first use can take ~50s)...' },
+        { pct: 25, delay: 8000, msg: '📤 Uploading ME5 file...' },
+        { pct: 45, delay: 15000, msg: '📦 Server received file, opening ZIP...' },
+        { pct: 60, delay: 25000, msg: '✏️ Replacing XML with IR commands...' },
+        { pct: 75, delay: 35000, msg: '🔧 Rebuilding ME5 structure...' },
+        { pct: 88, delay: 45000, msg: '📥 Almost done, preparing download...' },
+      ];
+      let progressDone = false;
+      const progressTimers = [];
+
+      function setProgress(pct, msg) {
+        if (progressDone) return;
+        if (statusEl) statusEl.innerHTML = `
+          <div style="font-size:0.95em;margin-bottom:4px">${msg}</div>
+          <div style="background:#e0e0e0;border-radius:6px;height:12px;width:100%;overflow:hidden">
+            <div style="background:#4a90e2;height:100%;width:${pct}%;transition:width 0.5s ease;border-radius:6px"></div>
+          </div>
+          <div style="font-size:0.8em;color:#666;margin-top:2px">${pct}% complete</div>
+        `;
+      }
+
+      progressSteps.forEach(({ pct, delay, msg }) => {
+        progressTimers.push(setTimeout(() => setProgress(pct, msg), delay));
+      });
+      setProgress(5, progressSteps[0].msg);
+      // --- End progress UI ---
+
       const me5Bytes = new Uint8Array(state.me5EncryptedBlob);
       console.log(`[Download] ME5 size: ${me5Bytes.length} bytes, XML size: ${new TextEncoder().encode(xml).length} bytes`);
       
@@ -1167,6 +1196,10 @@ async function downloadResult(mode) {
         body: formData
       });
       console.log(`[Download] Response status: ${response.status}`);
+
+      // Stop progress timers
+      progressDone = true;
+      progressTimers.forEach(t => clearTimeout(t));
       
       if (!response.ok) {
         throw new Error(`Server error: ${response.status}`);
@@ -1189,7 +1222,7 @@ async function downloadResult(mode) {
       a.click();
 
       if (statusEl) {
-        statusEl.textContent = `✅ Downloaded ${filename} — ready to use in Mind Express 5!`;
+        statusEl.innerHTML = `✅ Downloaded <strong>${filename}</strong> — ready to use in Mind Express 5!`;
       }
       console.log('[Download] .ME5 file downloaded successfully');
       return;
