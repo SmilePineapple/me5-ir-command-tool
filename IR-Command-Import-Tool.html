@@ -1152,30 +1152,17 @@ async function downloadResult(mode) {
       const statusEl = document.getElementById('inject-result-status');
       if (statusEl) statusEl.textContent = '⏳ Creating .ME5 file on server...';
       
-      // Compress ME5 data with gzip to stay under Vercel 4.5MB limit
-      console.log('[Download] Compressing ME5 data...');
       const me5Bytes = new Uint8Array(state.me5EncryptedBlob);
-      const compressed = pako.gzip(me5Bytes);
-      console.log(`[Download] Compressed: ${me5Bytes.length} -> ${compressed.length} bytes (${(compressed.length/me5Bytes.length*100).toFixed(1)}%)`);
-      
-      // Check XML size
-      const xmlBytes = new TextEncoder().encode(xml).length;
-      console.log(`[Download] XML size: ${xmlBytes} bytes`);
+      console.log(`[Download] ME5 size: ${me5Bytes.length} bytes, XML size: ${new TextEncoder().encode(xml).length} bytes`);
       
       const formData = new FormData();
-      formData.append('originalMe5', new Blob([compressed]), 'original.me5.gz');
-      formData.append('compressed', 'true');
+      formData.append('originalMe5', new Blob([me5Bytes]), 'original.me5');
       formData.append('modifiedXml', xml);
       formData.append('originalMe5Name', state.me5Filename || state.xmlFilename.replace('.xml', '.me5'));
       
-      // Calculate total FormData size (approximate)
-      let totalSize = compressed.length + xmlBytes + 500; // 500 for headers/overhead
-      console.log(`[Download] Estimated payload size: ${totalSize} bytes (${(totalSize/1024/1024).toFixed(2)} MB)`);
-      console.log(`[Download] Vercel limit: 4.5 MB. Payload is ${totalSize > 4.5*1024*1024 ? 'OVER' : 'UNDER'} limit`);
-      
-      // Call server API to create ME5
-      console.log('[Download] Sending request...');
-      const response = await fetch('/api/create-me5', {
+      // Call Render server API to create ME5
+      console.log('[Download] Sending to Render server...');
+      const response = await fetch('https://me5-ir-command-tool.onrender.com/api/create-me5', {
         method: 'POST',
         body: formData
       });
