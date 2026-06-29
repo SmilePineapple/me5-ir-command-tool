@@ -2,10 +2,16 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const AdmZip = require('adm-zip');
+const ZipCrypto = require('adm-zip/methods/zipcrypto');
+const zlib = require('zlib');
+const utils = require('adm-zip/util/utils');
 
 const PORT = process.env.PORT || 3001;
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024, fieldSize: 10 * 1024 * 1024 } });
+
+// ME5 encryption password
+const ME5_PASSWORD = 'The sound was as soft as the first drop of rain on a century of dust.';
 
 // CORS
 app.use((req, res, next) => {
@@ -33,7 +39,7 @@ app.post('/api/create-me5', upload.single('originalMe5'), (req, res) => {
 
         console.log(`[CreateME5] ME5: ${req.file.size} bytes, XML: ${modifiedXml.length} chars`);
 
-        const zip = new AdmZip(req.file.buffer);
+        const zip = new AdmZip(req.file.buffer, ME5_PASSWORD);
         const entries = zip.getEntries();
         console.log(`[CreateME5] Files in ME5: ${entries.length}`);
 
@@ -83,8 +89,45 @@ app.post('/api/create-me5', upload.single('originalMe5'), (req, res) => {
         const xmlPath = xmlEntry.entryName;
         console.log(`[CreateME5] Replacing: ${xmlPath}`);
 
-        zip.deleteFile(xmlPath);
-        zip.addFile(xmlPath, Buffer.from(modifiedXml, 'utf8'), '', 0);
+        // Update the entry in-place using setData (preserves header including encryption flag)
+        const wasEncrypted = xmlEntry.header.encrypted;
+        const origMethod = xmlEntry.header.method;
+        console.log(`[CreateME5] Original: encrypted=${wasEncrypted}, method=${origMethod}`);
+
+        const xmlBuffer = Buffer.from(modifiedXml, 'utf8');
+
+        if (!wasEncrypted) {
+            // Entry wasn't encrypted, just update normally
+            xmlEntry.setData(xmlBuffer);
+            const outputBuffer = zip.toBuffer();
+            console.log(`[CreateME5] Output (unencrypted): ${outputBuffer.length} bytes`);
+            const outputFilename = originalMe5Name.replace(/[^a-zA-Z0-9._\- ]/g, '_');
+            res.setHeader('Content-Type', 'application/octet-stream');
+            res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+            res.setHeader('Content-Length', outputBuffer.length);
+            res.send(outputBuffer);
+            return;
+        }
+
+        // For encrypted entries: manually compress + encrypt, then override getCompressedData
+        // adm-zip compresses but does NOT encrypt on write, so we do it ourselves
+        const compressedData = zlib.deflateRawSync(xmlBuffer);
+        const crc = utils.crc32(xmlBuffer);
+
+        // Update header with correct values
+        xmlEntry.header.crc = crc;
+        xmlEntry.header.size = xmlBuffer.length;
+        xmlEntry.header.encrypted = true;
+        xmlEntry.header.flags |= 0x1;
+
+        // Encrypt the compressed data (adds 12-byte salt header)
+        const encryptedData = ZipCrypto.encrypt(compressedData, xmlEntry.header, ME5_PASSWORD);
+        xmlEntry.header.compressedSize = encryptedData.length;
+
+        console.log(`[CreateME5] Compressed: ${compressedData.length}, Encrypted: ${encryptedData.length}`);
+
+        // Override getCompressedData so toBuffer() uses our pre-encrypted data
+        xmlEntry.getCompressedData = function() { return encryptedData; };
 
         const outputBuffer = zip.toBuffer();
         console.log(`[CreateME5] Output: ${outputBuffer.length} bytes`);
