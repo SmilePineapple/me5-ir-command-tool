@@ -848,11 +848,7 @@ async function processME5Buffer(buffer, filename, password) {
 
     statusEl.className = 'status-box info show';
     const rcPages = pageNames.filter(n => /remote|control|environ|television|set.top|ECU/i.test(n));
-    const highlighted = pageNames.map(n => {
-      const isRC = rcPages.includes(n);
-      return `${isRC ? '<strong>🎯 ' : '• '}${escHtml(n)}${isRC ? '</strong>' : ''}`;
-    });
-    statusEl.innerHTML = `<strong>Pages found (${pages.length} total, 🎯 = likely IR/ECU target):</strong><br>` + highlighted.join('<br>');
+    statusEl.innerHTML = `<strong>✅ ${pages.length} pages found.</strong> Select your target page from the dropdown below.`;
 
     if (pageNames.length > 0) {
       // Populate the target-page dropdown
@@ -864,8 +860,12 @@ async function processME5Buffer(buffer, filename, password) {
       sel.value = firstRC;
 
       // Populate the collapsible pages list
+      const highlighted = pageNames.map(n => {
+        const isRC = rcPages.includes(n);
+        return `${isRC ? '<strong>🎯 ' : '• '}${escHtml(n)}${isRC ? '</strong>' : ''}`;
+      });
       const listContent = document.getElementById('page-list-content');
-      listContent.innerHTML = highlighted.join('<br>');
+      listContent.innerHTML = `<strong>${pages.length} pages found (🎯 = likely IR/ECU target):</strong><br>` + highlighted.join('<br>');
       // Expand by default
       document.getElementById('page-list-wrap').open = true;
     }
@@ -924,11 +924,7 @@ function processXMLText(text, filename, dropLabel) {
   const statusEl = document.getElementById('xml-status');
   statusEl.className = 'status-box info show';
   const rcPages = pageNames.filter(n => /remote|control|environ|television|set.top|ECU/i.test(n));
-  const highlighted = pageNames.map(n => {
-    const isRC = rcPages.includes(n);
-    return `${isRC ? '<strong>🎯 ' : '• '}${escHtml(n)}${isRC ? '</strong>' : ''}`;
-  });
-  statusEl.innerHTML = `<strong>Pages found (${pages.length} total, 🎯 = likely IR/ECU target):</strong><br>` + highlighted.join('<br>');
+  statusEl.innerHTML = `<strong>✅ ${pages.length} pages found.</strong> Select your target page from the dropdown below.`;
 
   if (pageNames.length > 0) {
     // Populate the target-page dropdown
@@ -940,8 +936,12 @@ function processXMLText(text, filename, dropLabel) {
     sel.value = firstRC;
 
     // Populate the collapsible pages list
+    const highlighted = pageNames.map(n => {
+      const isRC = rcPages.includes(n);
+      return `${isRC ? '<strong>🎯 ' : '• '}${escHtml(n)}${isRC ? '</strong>' : ''}`;
+    });
     const listContent = document.getElementById('page-list-content');
-    listContent.innerHTML = highlighted.join('<br>');
+    listContent.innerHTML = `<strong>${pages.length} pages found (🎯 = likely IR/ECU target):</strong><br>` + highlighted.join('<br>');
     // Expand by default
     document.getElementById('page-list-wrap').open = true;
   }
@@ -1094,6 +1094,7 @@ function runInject() {
   console.log('[Inject] Matching strategy:', strategy);
 
   let skipped = 0;
+  const unmatchedFuncs = [];
 
   // Build Sym ID -> label map from all pages (for fallback matching of unlabeled buttons)
   // This maps symbol IDs to their function names by finding labeled buttons with the same Sym
@@ -1161,6 +1162,7 @@ function runInject() {
       } else {
         console.log('[Inject] NO MATCH for:', row.func, '— skipping (not adding new cell)');
         skipped++;
+        unmatchedFuncs.push(row.func);
       }
       return;
     }
@@ -1182,9 +1184,16 @@ function runInject() {
   const resultCard = document.getElementById('inject-result-card');
   const resultStatus = document.getElementById('inject-result-status');
   resultCard.classList.remove('hidden');
-  resultStatus.textContent = strategy === 'label'
-    ? `✅ Done! ${updated} cell(s) updated on page "${pageName}". ${skipped} CSV row(s) had no matching label and were skipped.`
-    : `✅ Done! ${updated} existing cell(s) updated, ${added} new cell(s) added to page "${pageName}".`;
+  if (strategy === 'label') {
+    let msg = `✅ Done! ${updated} cell(s) updated on page "${pageName}". ${skipped} CSV row(s) had no matching label and were skipped.`;
+    if (unmatchedFuncs.length > 0) {
+      msg += `<br><br><strong>Unmatched functions (add these manually in Mind Express):</strong><br>` +
+        unmatchedFuncs.map(f => `• ${escHtml(f)}`).join('<br>');
+    }
+    resultStatus.innerHTML = msg;
+  } else {
+    resultStatus.textContent = `✅ Done! ${updated} existing cell(s) updated, ${added} new cell(s) added to page "${pageName}".`;
+  }
   showStatus('inject-status', 'success', `✅ Injection complete — ${updated} updated, ${added} added. Download your modified XML below.`);
   resultCard.scrollIntoView({ behavior: 'smooth' });
 }
