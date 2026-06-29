@@ -953,18 +953,76 @@ function previewMatches() {
   }
 
   const existingLabels = page ? getExistingLabels(page) : [];
+  
+  // Build Sym ID -> label map for preview (same as injection logic)
+  const symToLabelMapPreview = {};
+  if (state.xmlDoc) {
+    state.xmlDoc.querySelectorAll('Page').forEach(p => {
+      p.querySelectorAll('Fld').forEach(fld => {
+        const lbl = (fld.getAttribute('label') || '').trim();
+        if (!lbl) return;
+        const sym = fld.querySelector('Sym');
+        if (sym) {
+          const symId = sym.getAttribute('id');
+          if (symId && !symToLabelMapPreview[symId]) {
+            symToLabelMapPreview[symId] = lbl;
+          }
+        }
+      });
+    });
+  }
+  
+  // Get unlabeled Fld Sym IDs on the target page
+  const unlabeledSymIds = [];
+  if (page) {
+    page.querySelectorAll('Fld').forEach(fld => {
+      const lbl = (fld.getAttribute('label') || '').trim();
+      if (!lbl) {
+        const sym = fld.querySelector('Sym');
+        if (sym) {
+          const symId = sym.getAttribute('id');
+          if (symId) unlabeledSymIds.push({ symId, fld });
+        }
+      }
+    });
+  }
+  
   let html = '<div class="match-list">';
   let matched = 0, newCells = 0;
 
   rows.forEach(row => {
     const funcNorm = row.func.replace(/\s+/g, '').toLowerCase();
-    const isMatch = strategy === 'label' && existingLabels.some(l => l.replace(/\s+/g, '').toLowerCase() === funcNorm);
+    let isMatch = false;
+    let matchMethod = '';
+    
+    if (strategy === 'label') {
+      // Pass 1: label match
+      isMatch = existingLabels.some(l => l.replace(/\s+/g, '').toLowerCase() === funcNorm);
+      if (isMatch) matchMethod = 'label';
+      
+      // Pass 2: Sym ID fallback
+      if (!isMatch && page) {
+        for (const { symId } of unlabeledSymIds) {
+          const mappedLabel = symToLabelMapPreview[symId];
+          if (mappedLabel) {
+            const mappedNorm = mappedLabel.replace(/\s+/g, '').toLowerCase();
+            if (mappedNorm === funcNorm || mappedNorm.includes(funcNorm) || funcNorm.includes(mappedNorm)) {
+              isMatch = true;
+              matchMethod = 'Sym:' + mappedLabel;
+              break;
+            }
+          }
+        }
+      }
+    }
+    
     const cls = strategy === 'append' ? 'new-cell' : (isMatch ? 'matched' : 'no-match');
     if (isMatch) matched++; else newCells++;
+    const matchInfo = matchMethod && matchMethod !== 'label' ? ` <span style="font-size:0.75em;color:#888">(${matchMethod})</span>` : '';
     html += `
       <div class="match-item ${cls}">
         <span class="match-icon"></span>
-        <span class="match-func">${escHtml(row.func)}</span>
+        <span class="match-func">${escHtml(row.func)}${matchInfo}</span>
         <span class="match-cmd">${escHtml(row.cmd)}</span>
       </div>`;
   });
@@ -1025,6 +1083,24 @@ function runInject() {
 
   let skipped = 0;
 
+  // Build Sym ID -> label map from all pages (for fallback matching of unlabeled buttons)
+  // This maps symbol IDs to their function names by finding labeled buttons with the same Sym
+  const symToLabelMap = {};
+  docClone.querySelectorAll('Page').forEach(p => {
+    p.querySelectorAll('Fld').forEach(fld => {
+      const lbl = (fld.getAttribute('label') || '').trim();
+      if (!lbl) return;
+      const sym = fld.querySelector('Sym');
+      if (sym) {
+        const symId = sym.getAttribute('id');
+        if (symId && !symToLabelMap[symId]) {
+          symToLabelMap[symId] = lbl;
+        }
+      }
+    });
+  });
+  console.log('[Inject] Sym ID -> label map:', JSON.stringify(symToLabelMap));
+
   rows.forEach((row, rowIndex) => {
     console.log('[Inject] Processing row', rowIndex, ': func="' + row.func + '"');
     
@@ -1032,18 +1108,42 @@ function runInject() {
       const funcNormalized = row.func.replace(/\s+/g, '').toLowerCase();
       let found = null;
 
-      // Search ONLY within the target page
+      // Pass 1: Search by label on the target page
       page.querySelectorAll('Fld').forEach(fld => {
         const lbl = (fld.getAttribute('label') || '').trim();
         const lblNormalized = lbl.replace(/\s+/g, '').toLowerCase();
-        console.log('[Inject]   Comparing "' + lbl + '" (normalized: "' + lblNormalized + '") vs "' + row.func + '" (normalized: "' + funcNormalized + '")');
         if (lblNormalized === funcNormalized) {
           found = fld;
         }
       });
 
+      // Pass 2: If no label match, try Sym ID fallback on unlabeled Flds
+      if (!found) {
+        page.querySelectorAll('Fld').forEach(fld => {
+          const lbl = (fld.getAttribute('label') || '').trim();
+          if (lbl) return; // Skip labeled Flds (already checked)
+          const sym = fld.querySelector('Sym');
+          if (sym) {
+            const symId = sym.getAttribute('id');
+            const mappedLabel = symToLabelMap[symId];
+            if (mappedLabel) {
+              const mappedNormalized = mappedLabel.replace(/\s+/g, '').toLowerCase();
+              // Check if the mapped label matches the CSV function
+              // Also handle partial matches like "Play / Pause" matching "Play"
+              if (mappedNormalized === funcNormalized ||
+                  mappedNormalized.includes(funcNormalized) ||
+                  funcNormalized.includes(mappedNormalized)) {
+                found = fld;
+                console.log('[Inject] Sym fallback match: Sym id=' + symId + ' -> "' + mappedLabel + '" matches "' + row.func + '"');
+              }
+            }
+          }
+        });
+      }
+
       if (found) {
-        console.log('[Inject] MATCHED:', row.func, '->', found.getAttribute('label'), 'on page:', pageName);
+        const foundLabel = found.getAttribute('label') || '(unlabeled, matched by Sym)';
+        console.log('[Inject] MATCHED:', row.func, '->', foundLabel, 'on page:', pageName);
         injectAction(docClone, found, row.cmd);
         updated++;
       } else {
