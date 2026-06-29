@@ -435,24 +435,29 @@
         <option value="">— Load a file to see pages —</option>
       </select>
 
-      <label class="field-label">Match strategy for finding cells</label>
-      <select id="match-strategy">
-        <option value="label">Match CSV Function → cell label (case-insensitive)</option>
-        <option value="append">Append new cells to page (don't match existing cells)</option>
-      </select>
+      <details style="margin-top:8px;">
+        <summary style="cursor:pointer;font-weight:600;color:#4a90e2;font-size:0.9em;">⚙️ Advanced settings (optional)</summary>
+        <div style="margin-top:8px;">
+          <label class="field-label">Match strategy for finding cells</label>
+          <select id="match-strategy">
+            <option value="label">Match CSV Function → cell label (case-insensitive)</option>
+            <option value="append">Append new cells to page (don't match existing cells)</option>
+          </select>
 
-      <label class="field-label">Action type in ME5</label>
-      <select id="action-type">
-        <option value="RunApp">RunApp (ME5 native — runs RRCmd.exe)</option>
-      </select>
+          <label class="field-label">Action type in ME5</label>
+          <select id="action-type">
+            <option value="RunApp">RunApp (ME5 native — runs RRCmd.exe)</option>
+          </select>
+        </div>
+      </details>
 
       <details id="page-list-wrap" style="margin-top:8px;">
-        <summary style="cursor:pointer;font-weight:600;color:#4a90e2;">📋 Pages found in uploaded XML (click to expand/collapse)</summary>
+        <summary style="cursor:pointer;font-weight:600;color:#4a90e2;font-size:0.9em;">📋 Pages found in uploaded XML (click to expand/collapse)</summary>
         <div id="page-list-content" style="margin-top:6px;max-height:300px;overflow-y:auto;font-size:0.85em;"></div>
       </details>
 
       <div class="btn-row">
-        <button class="btn btn-primary" onclick="runInject()" id="btn-inject">⚡ Run Injection</button>
+        <button class="btn btn-primary" onclick="runInjectAndDownload()" id="btn-inject">⚡ Inject & Download</button>
         <button class="btn btn-outline" onclick="previewMatches()" id="btn-preview-matches">🔍 Preview Matches</button>
       </div>
 
@@ -463,9 +468,6 @@
     <div class="card hidden" id="inject-result-card">
       <h2>✅ Result</h2>
       <div id="inject-result-status" class="status-box success show"></div>
-      <div class="btn-row">
-        <button class="btn btn-success" onclick="downloadResult('inject')" id="btn-dl-inject">⬇️ Download Modified Pageset</button>
-      </div>
     </div>
 
   </div>
@@ -847,20 +849,25 @@ async function processME5Buffer(buffer, filename, password) {
     drop.querySelector('.sub').textContent = '';
 
     statusEl.className = 'status-box info show';
-    const rcPages = pageNames.filter(n => /remote|control|environ|television|set.top|ECU/i.test(n));
     statusEl.innerHTML = `<strong>✅ ${pages.length} pages found.</strong> Select your target page from the dropdown below.`;
 
     if (pageNames.length > 0) {
-      // Populate the target-page dropdown
+      // Populate the target-page dropdown with RC/ECU pages first
       const sel = document.getElementById('target-page');
       sel.disabled = false;
-      sel.innerHTML = pageNames.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('');
+      const rcPages = pageNames.filter(n => /remote|control|environ|television|set.top|ECU/i.test(n));
+      const otherPages = pageNames.filter(n => !rcPages.includes(n));
+      const sorted = [...rcPages, ...otherPages];
+      sel.innerHTML = sorted.map(n => {
+        const isRC = rcPages.includes(n);
+        return `<option value="${escHtml(n)}">${isRC ? '🎯 ' : ''}${escHtml(n)}</option>`;
+      }).join('');
       // Auto-select first RC-related page if any
       const firstRC = rcPages[0] || pageNames[0];
       sel.value = firstRC;
 
       // Populate the collapsible pages list
-      const highlighted = pageNames.map(n => {
+      const highlighted = sorted.map(n => {
         const isRC = rcPages.includes(n);
         return `${isRC ? '<strong>🎯 ' : '• '}${escHtml(n)}${isRC ? '</strong>' : ''}`;
       });
@@ -923,20 +930,25 @@ function processXMLText(text, filename, dropLabel) {
 
   const statusEl = document.getElementById('xml-status');
   statusEl.className = 'status-box info show';
-  const rcPages = pageNames.filter(n => /remote|control|environ|television|set.top|ECU/i.test(n));
   statusEl.innerHTML = `<strong>✅ ${pages.length} pages found.</strong> Select your target page from the dropdown below.`;
 
   if (pageNames.length > 0) {
-    // Populate the target-page dropdown
+    // Populate the target-page dropdown with RC/ECU pages first
     const sel = document.getElementById('target-page');
     sel.disabled = false;
-    sel.innerHTML = pageNames.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('');
+    const rcPages = pageNames.filter(n => /remote|control|environ|television|set.top|ECU/i.test(n));
+    const otherPages = pageNames.filter(n => !rcPages.includes(n));
+    const sorted = [...rcPages, ...otherPages];
+    sel.innerHTML = sorted.map(n => {
+      const isRC = rcPages.includes(n);
+      return `<option value="${escHtml(n)}">${isRC ? '🎯 ' : ''}${escHtml(n)}</option>`;
+    }).join('');
     // Auto-select first RC-related page if any
     const firstRC = rcPages[0] || pageNames[0];
     sel.value = firstRC;
 
     // Populate the collapsible pages list
-    const highlighted = pageNames.map(n => {
+    const highlighted = sorted.map(n => {
       const isRC = rcPages.includes(n);
       return `${isRC ? '<strong>🎯 ' : '• '}${escHtml(n)}${isRC ? '</strong>' : ''}`;
     });
@@ -1058,7 +1070,7 @@ function getExistingLabels(pageEl) {
 }
 
 // ── Run inject ─────────────────────────────────────────────────────────────────
-function runInject() {
+async function runInject() {
   const rows = state.csv.inject;
   if (!rows) { showStatus('inject-status', 'error', '❌ Please load a CSV file first.'); return; }
   if (!state.xmlDoc) { showStatus('inject-status', 'error', '❌ Please load a pageset XML file first.'); return; }
@@ -1194,8 +1206,16 @@ function runInject() {
   } else {
     resultStatus.textContent = `✅ Done! ${updated} existing cell(s) updated, ${added} new cell(s) added to page "${pageName}".`;
   }
-  showStatus('inject-status', 'success', `✅ Injection complete — ${updated} updated, ${added} added. Download your modified XML below.`);
+  showStatus('inject-status', 'success', `✅ Injection complete — ${updated} updated, ${added} added. Preparing download...`);
   resultCard.scrollIntoView({ behavior: 'smooth' });
+
+  // Automatically trigger download
+  await downloadResult('inject');
+}
+
+// ── Run inject and download in one step ────────────────────────────────────────
+async function runInjectAndDownload() {
+  await runInject();
 }
 
 // ── Run generate ───────────────────────────────────────────────────────────────
