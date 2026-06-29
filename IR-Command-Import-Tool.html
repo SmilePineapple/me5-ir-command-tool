@@ -430,8 +430,10 @@
     <div class="card">
       <h2><span class="step-num">3</span> Configure injection settings</h2>
 
-      <label class="field-label">Target page name (must match exactly as it appears in the XML)</label>
-      <input type="text" id="target-page" placeholder='e.g. Remote Control - Television' value="">
+      <label class="field-label">Target page (select from the pages found in your file)</label>
+      <select id="target-page" disabled>
+        <option value="">— Load a file to see pages —</option>
+      </select>
 
       <label class="field-label">Match strategy for finding cells</label>
       <select id="match-strategy">
@@ -444,10 +446,10 @@
         <option value="RunApp">RunApp (ME5 native — runs RRCmd.exe)</option>
       </select>
 
-      <div id="page-list-wrap" style="display:none;">
-        <label class="field-label">Pages found in uploaded XML</label>
-        <select id="page-list" onchange="document.getElementById('target-page').value = this.value"></select>
-      </div>
+      <details id="page-list-wrap" style="margin-top:8px;">
+        <summary style="cursor:pointer;font-weight:600;color:#4a90e2;">📋 Pages found in uploaded XML (click to expand/collapse)</summary>
+        <div id="page-list-content" style="margin-top:6px;max-height:300px;overflow-y:auto;font-size:0.85em;"></div>
+      </details>
 
       <div class="btn-row">
         <button class="btn btn-primary" onclick="runInject()" id="btn-inject">⚡ Run Injection</button>
@@ -850,17 +852,22 @@ async function processME5Buffer(buffer, filename, password) {
       const isRC = rcPages.includes(n);
       return `${isRC ? '<strong>🎯 ' : '• '}${escHtml(n)}${isRC ? '</strong>' : ''}`;
     });
-    statusEl.innerHTML = `<strong>Pages found (🎯 = likely IR/ECU target):</strong><br>` + highlighted.join('<br>');
+    statusEl.innerHTML = `<strong>Pages found (${pages.length} total, 🎯 = likely IR/ECU target):</strong><br>` + highlighted.join('<br>');
 
     if (pageNames.length > 0) {
-      const wrap = document.getElementById('page-list-wrap');
-      wrap.style.display = 'block';
-      const sel = document.getElementById('page-list');
+      // Populate the target-page dropdown
+      const sel = document.getElementById('target-page');
+      sel.disabled = false;
       sel.innerHTML = pageNames.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('');
       // Auto-select first RC-related page if any
       const firstRC = rcPages[0] || pageNames[0];
       sel.value = firstRC;
-      document.getElementById('target-page').value = firstRC;
+
+      // Populate the collapsible pages list
+      const listContent = document.getElementById('page-list-content');
+      listContent.innerHTML = highlighted.join('<br>');
+      // Expand by default
+      document.getElementById('page-list-wrap').open = true;
     }
 
     // Enable inject button if CSV is loaded
@@ -921,17 +928,22 @@ function processXMLText(text, filename, dropLabel) {
     const isRC = rcPages.includes(n);
     return `${isRC ? '<strong>🎯 ' : '• '}${escHtml(n)}${isRC ? '</strong>' : ''}`;
   });
-  statusEl.innerHTML = `<strong>Pages found (🎯 = likely IR/ECU target):</strong><br>` + highlighted.join('<br>');
+  statusEl.innerHTML = `<strong>Pages found (${pages.length} total, 🎯 = likely IR/ECU target):</strong><br>` + highlighted.join('<br>');
 
   if (pageNames.length > 0) {
-    const wrap = document.getElementById('page-list-wrap');
-    wrap.style.display = 'block';
-    const sel = document.getElementById('page-list');
+    // Populate the target-page dropdown
+    const sel = document.getElementById('target-page');
+    sel.disabled = false;
     sel.innerHTML = pageNames.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('');
     // Auto-select first RC-related page if any
     const firstRC = rcPages[0] || pageNames[0];
     sel.value = firstRC;
-    document.getElementById('target-page').value = firstRC;
+
+    // Populate the collapsible pages list
+    const listContent = document.getElementById('page-list-content');
+    listContent.innerHTML = highlighted.join('<br>');
+    // Expand by default
+    document.getElementById('page-list-wrap').open = true;
   }
 }
 
