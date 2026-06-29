@@ -37,10 +37,46 @@ app.post('/api/create-me5', upload.single('originalMe5'), (req, res) => {
         const entries = zip.getEntries();
         console.log(`[CreateME5] Files in ME5: ${entries.length}`);
 
-        const xmlEntry = entries.find(e =>
-            e.entryName.toLowerCase().endsWith('.xml') &&
-            e.entryName.includes('Documents')
-        );
+        // Read meta.json to find the startDocument (the main pageset XML)
+        const metaEntry = entries.find(e => e.entryName.endsWith('meta.json'));
+        let targetXmlName = null;
+        if (metaEntry) {
+            try {
+                const meta = JSON.parse(metaEntry.getData().toString('utf8'));
+                targetXmlName = meta.startDocument;
+                console.log(`[CreateME5] meta.json startDocument: ${targetXmlName}`);
+            } catch (e) {
+                console.log('[CreateME5] Could not parse meta.json, falling back');
+            }
+        }
+
+        // Also check if client sent the XML filename
+        const clientXmlName = req.body.xmlFilename;
+        if (clientXmlName) {
+            console.log(`[CreateME5] Client sent xmlFilename: ${clientXmlName}`);
+            targetXmlName = targetXmlName || clientXmlName;
+        }
+
+        // Find the XML entry matching startDocument, or fall back to first XML in Documents/
+        let xmlEntry;
+        if (targetXmlName) {
+            xmlEntry = entries.find(e =>
+                e.entryName.toLowerCase().endsWith('.xml') &&
+                e.entryName.includes('Documents') &&
+                e.entryName.endsWith(targetXmlName)
+            );
+        }
+        if (!xmlEntry && clientXmlName) {
+            xmlEntry = entries.find(e =>
+                e.entryName.toLowerCase().endsWith(clientXmlName.toLowerCase())
+            );
+        }
+        if (!xmlEntry) {
+            xmlEntry = entries.find(e =>
+                e.entryName.toLowerCase().endsWith('.xml') &&
+                e.entryName.includes('Documents')
+            );
+        }
         if (!xmlEntry) throw new Error('Could not find XML file in ME5');
 
         const xmlPath = xmlEntry.entryName;
