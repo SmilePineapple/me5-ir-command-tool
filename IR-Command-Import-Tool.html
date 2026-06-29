@@ -782,18 +782,35 @@ async function processME5Buffer(buffer, filename, password) {
       throw new Error('No XML file found in .ME5');
     }
 
-    // Sort by preference
-    xmlEntries.sort((a, b) => {
-      const aInDocs = a.filename.toLowerCase().includes('documents') ? 1 : 0;
-      const bInDocs = b.filename.toLowerCase().includes('documents') ? 1 : 0;
-      if (aInDocs !== bInDocs) return bInDocs - aInDocs;
-      const aDepth = (a.filename.match(/\//g) || []).length;
-      const bDepth = (b.filename.match(/\//g) || []).length;
-      if (aDepth !== bDepth) return aDepth - bDepth;
-      return (b.uncompressedSize || 0) - (a.uncompressedSize || 0);
-    });
+    // Read meta.json to find startDocument
+    let targetXmlName = null;
+    const metaEntry = entries.find(e => e.filename.endsWith('meta.json'));
+    if (metaEntry) {
+      try {
+        const metaText = await metaEntry.getData(new zip.TextWriter(), password ? { password } : undefined);
+        const meta = JSON.parse(metaText);
+        targetXmlName = meta.startDocument;
+        console.log('[ME5] meta.json startDocument:', targetXmlName);
+      } catch (e) {
+        console.log('[ME5] Could not read meta.json:', e.message);
+      }
+    }
 
-    const xmlEntry = xmlEntries[0];
+    // Find the XML entry matching startDocument
+    let xmlEntry;
+    if (targetXmlName) {
+      xmlEntry = xmlEntries.find(e => e.filename.endsWith(targetXmlName));
+    }
+    if (!xmlEntry) {
+      // Fallback: sort by preference (Documents folder, largest size)
+      xmlEntries.sort((a, b) => {
+        const aInDocs = a.filename.toLowerCase().includes('documents') ? 1 : 0;
+        const bInDocs = b.filename.toLowerCase().includes('documents') ? 1 : 0;
+        if (aInDocs !== bInDocs) return bInDocs - aInDocs;
+        return (b.uncompressedSize || 0) - (a.uncompressedSize || 0);
+      });
+      xmlEntry = xmlEntries[0];
+    }
     console.log('[ME5] Selected:', xmlEntry.filename);
 
     // Read XML with password if needed
@@ -810,17 +827,41 @@ async function processME5Buffer(buffer, filename, password) {
 
     // Store state
     state.xmlDoc = doc;
+    state.xmlText = xmlText;
     state.xmlFilename = filename.replace(/\.me5$/i, '.xml');
     state.me5Filename = filename;  // Keep original ME5 filename for download
     state.isME5 = true;
     state.me5EncryptedBlob = buffer;
     state.me5XmlPath = xmlEntry.filename;
 
-    // Update UI
-    statusEl.className = 'status-box success show';
-    statusEl.textContent = `✅ Loaded ${filename} (${xmlEntry.filename})`;
-    const filenameEl = document.getElementById('xml-filename');
-    if (filenameEl) filenameEl.textContent = filename;
+    // Update UI — populate page names dropdown
+    const pages = doc.querySelectorAll('Page');
+    const pageNames = [...pages].map(p => p.getAttribute('name') || '').filter(Boolean);
+    console.log('[ME5] Pages found:', pages.length, pageNames.slice(0, 10));
+
+    const drop = document.getElementById('xml-drop');
+    drop.classList.add('loaded');
+    drop.querySelector('.label').textContent = `📦 ${filename} — ${pages.length} pages`;
+    drop.querySelector('.sub').textContent = '';
+
+    statusEl.className = 'status-box info show';
+    const rcPages = pageNames.filter(n => /remote|control|environ|television|set.top|ECU/i.test(n));
+    const highlighted = pageNames.map(n => {
+      const isRC = rcPages.includes(n);
+      return `${isRC ? '<strong>🎯 ' : '• '}${escHtml(n)}${isRC ? '</strong>' : ''}`;
+    });
+    statusEl.innerHTML = `<strong>Pages found (🎯 = likely IR/ECU target):</strong><br>` + highlighted.join('<br>');
+
+    if (pageNames.length > 0) {
+      const wrap = document.getElementById('page-list-wrap');
+      wrap.style.display = 'block';
+      const sel = document.getElementById('page-list');
+      sel.innerHTML = pageNames.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('');
+      // Auto-select first RC-related page if any
+      const firstRC = rcPages[0] || pageNames[0];
+      sel.value = firstRC;
+      document.getElementById('target-page').value = firstRC;
+    }
 
     // Enable inject button if CSV is loaded
     if (state.csvRows) {
