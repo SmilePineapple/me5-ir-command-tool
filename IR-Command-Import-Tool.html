@@ -916,8 +916,9 @@ function previewMatches() {
   let matched = 0, newCells = 0;
 
   rows.forEach(row => {
-    const isMatch = strategy === 'label' && existingLabels.some(l => l.toLowerCase() === row.func.toLowerCase());
-    const cls = strategy === 'append' ? 'new-cell' : (isMatch ? 'matched' : 'new-cell');
+    const funcNorm = row.func.replace(/\s+/g, '').toLowerCase();
+    const isMatch = strategy === 'label' && existingLabels.some(l => l.replace(/\s+/g, '').toLowerCase() === funcNorm);
+    const cls = strategy === 'append' ? 'new-cell' : (isMatch ? 'matched' : 'no-match');
     if (isMatch) matched++; else newCells++;
     html += `
       <div class="match-item ${cls}">
@@ -929,7 +930,7 @@ function previewMatches() {
   html += '</div>';
 
   const summary = strategy === 'label'
-    ? `${matched} cells will be updated, ${newCells} new cells will be appended.`
+    ? `${matched} cells will be updated, ${newCells} CSV rows have no matching label and will be skipped.`
     : `${rows.length} new cells will be appended to the page.`;
 
   showStatus('inject-status', 'info', `🔍 Preview: ${summary}`);
@@ -981,40 +982,37 @@ function runInject() {
   console.log('[Inject] CSV functions to match:', rows.map(r => r.func));
   console.log('[Inject] Matching strategy:', strategy);
 
+  let skipped = 0;
+
   rows.forEach((row, rowIndex) => {
-    console.log('[Inject] Processing row', rowIndex, ': func="' + row.func + '" (lowercase: "' + row.func.toLowerCase() + '")');
+    console.log('[Inject] Processing row', rowIndex, ': func="' + row.func + '"');
     
     if (strategy === 'label') {
-      let found = null;
-      let foundPage = null;
       const funcNormalized = row.func.replace(/\s+/g, '').toLowerCase();
-      
-      // Search across ALL pages in the document
-      docClone.querySelectorAll('Page').forEach(p => {
-        const pageName = p.getAttribute('name') || '';
-        p.querySelectorAll('Fld').forEach(fld => {
-          const lbl = (fld.getAttribute('label') || '').trim();
-          // Normalize by removing spaces for comparison (e.g., "VOL +" matches "Vol+")
-          const lblNormalized = lbl.replace(/\s+/g, '').toLowerCase();
-          console.log('[Inject]   Comparing on page "' + pageName + '": "' + lbl + '" (normalized: "' + lblNormalized + '") vs "' + row.func + '" (normalized: "' + funcNormalized + '")');
-          if (lblNormalized === funcNormalized) {
-            found = fld;
-            foundPage = p;
-          }
-        });
+      let found = null;
+
+      // Search ONLY within the target page
+      page.querySelectorAll('Fld').forEach(fld => {
+        const lbl = (fld.getAttribute('label') || '').trim();
+        const lblNormalized = lbl.replace(/\s+/g, '').toLowerCase();
+        console.log('[Inject]   Comparing "' + lbl + '" (normalized: "' + lblNormalized + '") vs "' + row.func + '" (normalized: "' + funcNormalized + '")');
+        if (lblNormalized === funcNormalized) {
+          found = fld;
+        }
       });
 
       if (found) {
-        console.log('[Inject] MATCHED:', row.func, '->', found.getAttribute('label'), 'on page:', foundPage.getAttribute('name'));
+        console.log('[Inject] MATCHED:', row.func, '->', found.getAttribute('label'), 'on page:', pageName);
         injectAction(docClone, found, row.cmd);
         updated++;
-        return;
       } else {
-        console.log('[Inject] NO MATCH for:', row.func, 'on any page');
+        console.log('[Inject] NO MATCH for:', row.func, '— skipping (not adding new cell)');
+        skipped++;
       }
+      return;
     }
 
-    // Append new Fld to the selected page
+    // Append-only strategy: always add new cell
     console.log('[Inject] Adding new cell for:', row.func, 'on page:', pageName);
     const fld = buildNewFld(docClone, row.func, row.cmd, added + updated);
     page.appendChild(fld);
@@ -1031,7 +1029,9 @@ function runInject() {
   const resultCard = document.getElementById('inject-result-card');
   const resultStatus = document.getElementById('inject-result-status');
   resultCard.classList.remove('hidden');
-  resultStatus.textContent = `✅ Done! ${updated} existing cell(s) updated, ${added} new cell(s) added to page "${pageName}".`;
+  resultStatus.textContent = strategy === 'label'
+    ? `✅ Done! ${updated} cell(s) updated on page "${pageName}". ${skipped} CSV row(s) had no matching label and were skipped.`
+    : `✅ Done! ${updated} existing cell(s) updated, ${added} new cell(s) added to page "${pageName}".`;
   showStatus('inject-status', 'success', `✅ Injection complete — ${updated} updated, ${added} added. Download your modified XML below.`);
   resultCard.scrollIntoView({ behavior: 'smooth' });
 }
