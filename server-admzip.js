@@ -50,28 +50,29 @@ app.post('/api/create-me5', upload.single('originalMe5'), (req, res) => {
             }
         }
 
-        // Also check if client sent the XML filename
+        // Also check if client sent the XML filename (now sends full path inside zip)
         const clientXmlName = req.body.xmlFilename;
         if (clientXmlName) {
             console.log(`[CreateME5] Client sent xmlFilename: ${clientXmlName}`);
-            targetXmlName = targetXmlName || clientXmlName;
+            // Use client path as highest priority since it's the actual zip entry path
+            targetXmlName = clientXmlName;
         }
 
-        // Find the XML entry matching startDocument, or fall back to first XML in Documents/
+        // Find the XML entry matching the target path
         let xmlEntry;
         if (targetXmlName) {
-            xmlEntry = entries.find(e =>
-                e.entryName.toLowerCase().endsWith('.xml') &&
-                e.entryName.includes('Documents') &&
-                e.entryName.endsWith(targetXmlName)
-            );
-        }
-        if (!xmlEntry && clientXmlName) {
-            xmlEntry = entries.find(e =>
-                e.entryName.toLowerCase().endsWith(clientXmlName.toLowerCase())
-            );
+            // Try exact match first
+            xmlEntry = entries.find(e => e.entryName === targetXmlName);
+            // Try endsWith match (in case of path differences)
+            if (!xmlEntry) {
+                xmlEntry = entries.find(e =>
+                    e.entryName.toLowerCase().endsWith('.xml') &&
+                    e.entryName.toLowerCase().endsWith(targetXmlName.toLowerCase())
+                );
+            }
         }
         if (!xmlEntry) {
+            // Fallback: find first XML in Documents/ folder
             xmlEntry = entries.find(e =>
                 e.entryName.toLowerCase().endsWith('.xml') &&
                 e.entryName.includes('Documents')

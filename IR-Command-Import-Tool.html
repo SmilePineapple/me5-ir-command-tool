@@ -1229,7 +1229,7 @@ async function downloadResult(mode) {
       formData.append('originalMe5', new Blob([me5Bytes]), 'original.me5');
       formData.append('modifiedXml', xml);
       formData.append('originalMe5Name', state.me5Filename || state.xmlFilename.replace('.xml', '.me5'));
-      formData.append('xmlFilename', state.xmlFilename || '');
+      formData.append('xmlFilename', state.me5XmlPath || state.xmlFilename || '');
       
       // Call Render server API to create ME5
       console.log('[Download] Sending to Render server...');
