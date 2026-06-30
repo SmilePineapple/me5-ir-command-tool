@@ -996,6 +996,55 @@ function previewMatches() {
     });
   }
   
+  // Build Action -> label map for preview
+  const actionToLabelMapPreview = {};
+  if (state.xmlDoc) {
+    state.xmlDoc.querySelectorAll('Page').forEach(p => {
+      p.querySelectorAll('Fld').forEach(fld => {
+        const lbl = (fld.getAttribute('label') || '').trim();
+        if (!lbl) return;
+        const actEl = fld.querySelector('Act');
+        if (actEl) {
+          const param = actEl.getAttribute('param') || '';
+          const actionMatch = param.match(/Action=&quot;(\d+)&quot;/);
+          if (actionMatch && !actionToLabelMapPreview[actionMatch[1]]) {
+            actionToLabelMapPreview[actionMatch[1]] = lbl;
+          }
+        }
+      });
+    });
+  }
+  
+  // Common alias map (same as injection)
+  const funcAliases = {
+    'ch+': ['ch+', 'channel+', 'channelup', 'chup'],
+    'ch-': ['ch-', 'channel-', 'channeldown', 'chdown'],
+    'vol+': ['vol+', 'volume+', 'volumeup', 'volup'],
+    'vol-': ['vol-', 'volume-', 'volumedown', 'voldown'],
+    'rewind': ['rewind', 'skipbackward', 'skipback', 'backward'],
+    'fastforward': ['fastforward', 'skipforward', 'skipfoward', 'forward'],
+    'play': ['play', 'play/pause', 'playpause'],
+    'pause': ['pause', 'play/pause', 'playpause'],
+    'stop': ['stop'],
+    'mute': ['mute', 'unmute', 'mute/unmute'],
+    'ok': ['ok', 'select', 'enter', 'confirm'],
+    'back': ['back', 'goback', 'return'],
+    'home': ['home', 'homepage', 'main', 'mainmenu'],
+    'menu': ['menu', 'settings', 'options'],
+    'exit': ['exit', 'close', 'quit'],
+    'power': ['power', 'poweronoff', 'onoff'],
+    'up': ['up', 'uparrow', 'arrowup'],
+    'down': ['down', 'downarrow', 'arrowdown'],
+    'left': ['left', 'leftarrow', 'arrowleft'],
+    'right': ['right', 'rightarrow', 'arrowright'],
+    'info': ['info', 'information', 'display', 'guide'],
+    'source': ['source', 'input', 'av', 'hdmi'],
+    'colours': ['colours', 'color', 'colorbuttons', 'coloredbuttons'],
+    'dots': ['dots', 'dotbuttons', 'dot'],
+    'mic': ['mic', 'microphone', 'voice'],
+    'plus': ['plus', 'add', 'increase'],
+  };
+  
   // Get unlabeled Fld Sym IDs on the target page
   const unlabeledSymIds = [];
   if (page) {
@@ -1020,8 +1069,10 @@ function previewMatches() {
     let matchMethod = '';
     
     if (strategy === 'label') {
-      // Pass 1: label match
-      isMatch = existingLabels.some(l => l.replace(/\s+/g, '').toLowerCase() === funcNorm);
+      const aliases = funcAliases[funcNorm] || [funcNorm];
+      
+      // Pass 1: label match (try all aliases)
+      isMatch = existingLabels.some(l => aliases.includes(l.replace(/\s+/g, '').toLowerCase()));
       if (isMatch) matchMethod = 'label';
       
       // Pass 2: Sym ID fallback
@@ -1030,10 +1081,32 @@ function previewMatches() {
           const mappedLabel = symToLabelMapPreview[symId];
           if (mappedLabel) {
             const mappedNorm = mappedLabel.replace(/\s+/g, '').toLowerCase();
-            if (mappedNorm === funcNorm || mappedNorm.includes(funcNorm) || funcNorm.includes(mappedNorm)) {
+            if (aliases.some(a => mappedNorm === a || mappedNorm.includes(a) || a.includes(mappedNorm))) {
               isMatch = true;
               matchMethod = 'Sym:' + mappedLabel;
               break;
+            }
+          }
+        }
+      }
+      
+      // Pass 3: Action number fallback
+      if (!isMatch && page) {
+        for (const { fld } of unlabeledSymIds) {
+          const actEl = fld.querySelector('Act');
+          if (actEl) {
+            const param = actEl.getAttribute('param') || '';
+            const actionMatch = param.match(/Action=&quot;(\d+)&quot;/);
+            if (actionMatch) {
+              const mappedLabel = actionToLabelMapPreview[actionMatch[1]];
+              if (mappedLabel) {
+                const mappedNorm = mappedLabel.replace(/\s+/g, '').toLowerCase();
+                if (aliases.some(a => mappedNorm === a || mappedNorm.includes(a) || a.includes(mappedNorm))) {
+                  isMatch = true;
+                  matchMethod = 'Action:' + mappedLabel;
+                  break;
+                }
+              }
             }
           }
         }
@@ -1126,6 +1199,54 @@ async function runInject() {
   });
   console.log('[Inject] Sym ID -> label map:', JSON.stringify(symToLabelMap));
 
+  // Build domotica Action -> label map from all pages (for unlabeled buttons with PlugIn domotica actions)
+  const actionToLabelMap = {};
+  docClone.querySelectorAll('Page').forEach(p => {
+    p.querySelectorAll('Fld').forEach(fld => {
+      const lbl = (fld.getAttribute('label') || '').trim();
+      if (!lbl) return;
+      const actEl = fld.querySelector('Act');
+      if (actEl) {
+        const param = actEl.getAttribute('param') || '';
+        const actionMatch = param.match(/Action=&quot;(\d+)&quot;/);
+        if (actionMatch && !actionToLabelMap[actionMatch[1]]) {
+          actionToLabelMap[actionMatch[1]] = lbl;
+        }
+      }
+    });
+  });
+  console.log('[Inject] Action -> label map:', JSON.stringify(actionToLabelMap));
+
+  // Common alias map: CSV function name -> alternative names to try matching
+  const funcAliases = {
+    'ch+': ['ch+', 'channel+', 'channelup', 'chup'],
+    'ch-': ['ch-', 'channel-', 'channeldown', 'chdown'],
+    'vol+': ['vol+', 'volume+', 'volumeup', 'volup'],
+    'vol-': ['vol-', 'volume-', 'volumedown', 'voldown'],
+    'rewind': ['rewind', 'skipbackward', 'skipback', 'backward', 'rewind'],
+    'fastforward': ['fastforward', 'skipforward', 'skipfoward', 'forward'],
+    'play': ['play', 'play/pause', 'playpause'],
+    'pause': ['pause', 'play/pause', 'playpause'],
+    'stop': ['stop', 'stop'],
+    'mute': ['mute', 'unmute', 'mute/unmute'],
+    'ok': ['ok', 'select', 'enter', 'confirm'],
+    'back': ['back', 'goback', 'goback', 'return'],
+    'home': ['home', 'homepage', 'main', 'mainmenu'],
+    'menu': ['menu', 'settings', 'options'],
+    'exit': ['exit', 'close', 'quit'],
+    'power': ['power', 'poweronoff', 'onoff'],
+    'up': ['up', 'uparrow', 'arrowup'],
+    'down': ['down', 'downarrow', 'arrowdown'],
+    'left': ['left', 'leftarrow', 'arrowleft'],
+    'right': ['right', 'rightarrow', 'arrowright'],
+    'info': ['info', 'information', 'display', 'guide'],
+    'source': ['source', 'input', 'av', 'hdmi'],
+    'colours': ['colours', 'color', 'colorbuttons', 'coloredbuttons'],
+    'dots': ['dots', 'dotbuttons', 'dot'],
+    'mic': ['mic', 'microphone', 'voice'],
+    'plus': ['plus', 'add', 'increase'],
+  };
+
   rows.forEach((row, rowIndex) => {
     console.log('[Inject] Processing row', rowIndex, ': func="' + row.func + '"');
     
@@ -1133,11 +1254,14 @@ async function runInject() {
       const funcNormalized = row.func.replace(/\s+/g, '').toLowerCase();
       let found = null;
 
-      // Pass 1: Search by label on the target page
+      // Get aliases for this function
+      const aliases = funcAliases[funcNormalized] || [funcNormalized];
+
+      // Pass 1: Search by label on the target page (try all aliases)
       page.querySelectorAll('Fld').forEach(fld => {
         const lbl = (fld.getAttribute('label') || '').trim();
         const lblNormalized = lbl.replace(/\s+/g, '').toLowerCase();
-        if (lblNormalized === funcNormalized) {
+        if (aliases.includes(lblNormalized)) {
           found = fld;
         }
       });
@@ -1153,13 +1277,34 @@ async function runInject() {
             const mappedLabel = symToLabelMap[symId];
             if (mappedLabel) {
               const mappedNormalized = mappedLabel.replace(/\s+/g, '').toLowerCase();
-              // Check if the mapped label matches the CSV function
-              // Also handle partial matches like "Play / Pause" matching "Play"
-              if (mappedNormalized === funcNormalized ||
-                  mappedNormalized.includes(funcNormalized) ||
-                  funcNormalized.includes(mappedNormalized)) {
+              // Check if any alias matches the mapped label
+              if (aliases.some(a => mappedNormalized === a || mappedNormalized.includes(a) || a.includes(mappedNormalized))) {
                 found = fld;
                 console.log('[Inject] Sym fallback match: Sym id=' + symId + ' -> "' + mappedLabel + '" matches "' + row.func + '"');
+              }
+            }
+          }
+        });
+      }
+
+      // Pass 3: If still no match, try domotica Action number fallback on unlabeled Flds
+      if (!found) {
+        page.querySelectorAll('Fld').forEach(fld => {
+          const lbl = (fld.getAttribute('label') || '').trim();
+          if (lbl) return; // Skip labeled Flds
+          const actEl = fld.querySelector('Act');
+          if (actEl) {
+            const param = actEl.getAttribute('param') || '';
+            const actionMatch = param.match(/Action=&quot;(\d+)&quot;/);
+            if (actionMatch) {
+              const actionNum = actionMatch[1];
+              const mappedLabel = actionToLabelMap[actionNum];
+              if (mappedLabel) {
+                const mappedNormalized = mappedLabel.replace(/\s+/g, '').toLowerCase();
+                if (aliases.some(a => mappedNormalized === a || mappedNormalized.includes(a) || a.includes(mappedNormalized))) {
+                  found = fld;
+                  console.log('[Inject] Action fallback match: Action=' + actionNum + ' -> "' + mappedLabel + '" matches "' + row.func + '"');
+                }
               }
             }
           }
